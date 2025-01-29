@@ -1,1 +1,0 @@
-# rosovetrovnitsa_bot

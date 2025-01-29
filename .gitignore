@@ -1,6 +1,0 @@
-*venv*
-*files*
-__pycache__*
-*/.env
-.dockerignore
-*Dockerfile*
