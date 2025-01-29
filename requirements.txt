@@ -2,7 +2,9 @@ python-telegram-bot
 xlrd
 pandas
 plotly.express
-# kaleido
+kaleido
 python-decouple
 numpy
 datetime
+#gzip
+#shutil
