@@ -1,0 +1,8 @@
+python-telegram-bot
+xlrd
+pandas
+plotly.express
+# kaleido
+python-decouple
+numpy
+datetime
