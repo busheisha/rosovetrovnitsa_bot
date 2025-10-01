@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rozovetrovnitsa_bot
+    restart: unless-stopped
+    
+    # Переменные окружения из .env файла
+    env_file:
+      - .env
+    
+    # Можно также задать переменные напрямую (раскомментируй если нужно)
+    # environment:
+    #   - TG_TOKEN=${TG_TOKEN}
+    
+    # Volumes для сохранения файлов между перезапусками
+    volumes:
+      - ./bot/files:/app/bot/files
+    
+    # Логирование
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3" 
