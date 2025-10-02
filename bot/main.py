@@ -1,5 +1,5 @@
 import logging
-
+import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
@@ -35,20 +35,30 @@ async def rose(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         temperature_path = f'bot/files/images/{user_id}_temperature.jpg'
         rain_path = f'bot/files/images/{user_id}_rain.jpg'
         
-        # Закомментированные пути для раздельных роз
-        # simple_windrose_path = f'bot/files/images/{user_id}_simple_windrose.jpg'
-        # smart_windrose_path = f'bot/files/images/{user_id}_smart_windrose.jpg'
+        try: 
+            file = await update.message.document.get_file()
+            await file.download_to_drive(custom_path=input_file_path)
+            # Валидируем файл
+            is_valid, message = validate_meteo_file(input_file_path)
+            if not is_valid:
+                await update.message.reply_text(message)
+                # Удаляем невалидный файл
+                if os.path.exists(input_file_path):
+                    os.remove(input_file_path)
+                return
+        
+        
+            await update.message.reply_photo(create_combined_rose(input_file_path, windrose_path))
+            await update.message.reply_photo(create_temperature(input_file_path, temperature_path))
+            await update.message.reply_photo(create_rain(input_file_path, rain_path))
+            
+            await update.message.reply_text(text=messages.ROSE_MESSAGE)
+        except Exception as e:
+            await update.message.reply_text(text=f"❌ Ошибка при обработке файла: {e}")
+                        # Очищаем файлы в случае ошибки
+            if os.path.exists(input_file_path):
+                os.remove(input_file_path)
 
-        file = await update.message.document.get_file()
-        await file.download_to_drive(custom_path=input_file_path)
-        
-        await update.message.reply_photo(create_combined_rose(input_file_path, windrose_path))
-        # await update.message.reply_photo(create_windrose(input_file_path, simple_windrose_path))
-        # await update.message.reply_photo(create_smartrose(input_file_path, smart_windrose_path))
-        await update.message.reply_photo(create_temperature(input_file_path, temperature_path))
-        await update.message.reply_photo(create_rain(input_file_path, rain_path))
-        
-        await update.message.reply_text(text=messages.ROSE_MESSAGE)
 
 
 def main() -> None:
