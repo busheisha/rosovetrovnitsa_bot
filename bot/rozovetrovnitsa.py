@@ -10,8 +10,6 @@ import os
 import tempfile
 from pathlib import Path
 
-import tempfile
-
 # Константы
 WIND_DIRECTIONS = ['С', 'ССВ', 'СВ', 'ВСВ', 'В', 'ВЮВ', 'ЮВ', 'ЮЮВ', 'Ю', 'ЮЮЗ', 'ЮЗ', 'ЗЮЗ', 'З', 'ЗСЗ', 'СЗ', 'ССЗ']
 
@@ -414,55 +412,116 @@ def create_temperature(file_path: str, third_image_path: str) -> str:
         if os.path.exists(extracted_path):
             os.remove(extracted_path)
 
-def validate_meteo_file(file_path: str) -> tuple[bool, str]:
-    """
-    Валидирует файл метеоданных на безопасность.
-    
-    Args:
-        file_path: Путь к файлу .xls.gz
-        
-    Returns:
-        tuple: (is_valid, message) - валидность и сообщение
-    """
-    
-    # 1. Проверка расширения
-    if not file_path.endswith('.xls.gz'):
-        return False, "❌ Мы принимаем только файлы .xls.gz"
-    
-    # 2. Проверка что файл существует
-    if not os.path.exists(file_path):
-        return False, "❌ Файл не найден"
-    
-    # 3. Проверка что это gzip архив
+def ADD(file_path: str) -> int:
+    """Считает сумму положительных суточных средних температур (degree-days, Tbase=0)."""
+    extracted_path = extract_gzip_file(file_path)
     try:
-        with gzip.open(file_path, 'rb') as f:
-            f.read(1024)  # Читаем первые 1024 байта
-    except gzip.BadGzipFile:
-        return False, "❌ Файл повреждён или не является gzip архивом"
-    except Exception as e:
-        return False, f"❌ Ошибка при чтении архива: {str(e)}"
-    
-    # 4. Проверка что внутри Excel файл
-    temp_dir = None
-    try:
-        # Создаём временный файл для распаковки
-        temp_dir = tempfile.mkdtemp()
-        temp_xls_path = os.path.join(temp_dir, 'temp.xls')
-        
-        # Распаковываем
-        with gzip.open(file_path, 'rb') as f_in:
-            with open(temp_xls_path, 'wb') as f_out:
-                shutil.copyfileobj(f_in, f_out)
-        
-        # Пытаемся прочитать как Excel
-        df = pd.read_excel(temp_xls_path, nrows=1)
-        
-        return True, "✅ Файл прошёл валидацию"
-        
-    except Exception as e:
-        return False, f"❌ Внутри архива должен быть Excel файл: {str(e)}"
-    
+        df = pd.read_excel(extracted_path)
+        df.columns = df.iloc[5]
+        df = df.drop(range(6))
+        df = df.rename(columns={df.columns[0]: 'time'})
+
+        df['time'] = pd.to_datetime(df['time'], errors='coerce', dayfirst=True).dt.date
+        df['T'] = pd.to_numeric(df['T'], errors='coerce')
+        df = df.dropna(subset=['time', 'T'])
+        daily = df.groupby('time', as_index=False)['T'].mean()
+        return int(daily['T'].clip(lower=0).sum())
     finally:
-        # Очищаем временные файлы
-        if temp_dir and os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
+        if os.path.exists(extracted_path):
+            os.remove(extracted_path)
+
+
+#def calculate_tbs(add: int) -> int:
+    # 1. Считаем десятичный логарифм
+    log_add = np.log10(max(1, add))
+    
+    # 2. Защита: выражение под корнем не должно быть меньше 0
+    inner_expression = (log_add - 1.81) / 0.00155
+    inner_expression = np.maximum(0, inner_expression)
+    
+    # 3. Считаем формулу, округляем и зажимаем в рамки шкалы (3-31)
+    tbs_float = np.sqrt(inner_expression)
+    tbs_bounded = np.clip(np.round(tbs_float), 3, 31)
+    
+    return int(tbs_bounded)
+
+def calculate_tbs(add: int) -> int:
+    # Защита от нулевого или отрицательного тепла
+    if add <= 0:
+        return 3
+        
+    # Настоящая сетка медианных значений ADD из статьи Медьези
+    if add <= 35:   return 4   # Свежее тело, едва заметные изменения цвета
+    if add <= 75:   return 7   # Начальное газообразование (появились первые газы)
+    if add <= 140:  return 9   # Начальное газообразование (выраженный мраморный рисунок вен)
+    if add <= 200:  return 11  # ВЫРАЖЕННОЕ ГАЗООБРАЗОВАНИЕ (Твои 159 ADD теперь четко ложатся сюда!)
+    if add <= 300:  return 14  # Активный распад (газы вышли, ткани темнеют)
+    if add <= 450:  return 17  # Активный распад (пик личинок)
+    if add <= 650:  return 21  # Сухой распад (первые кости наружу)
+    if add <= 900:  return 25  # Начало скелетирования
+    if add <= 1300: return 28  # Выраженное скелетирование
+    
+    return 31  # Полное скелетирование (плато)
+
+
+def verdict_tbs(tbs: int, add: int) -> str:
+    # # 1. Сначала определяем текстовую стадию по значению tbs
+    if 3 <= tbs <= 6:
+        stage = "до начала газообразования"
+    elif 7 <= tbs <= 9:
+        stage = "начальное газообразование"
+    elif 10 <= tbs <= 12:
+        stage = "выраженное газообразование"
+    elif 13 <= tbs <= 17:
+        stage = "активный распад"
+    elif 18 <= tbs <= 24:
+        stage = "сухой распад"
+    elif 25 <= tbs <= 31:
+        stage = "скелетирование"
+    else:
+        stage = "неизвестная стадия"
+
+# # Интуитивная шкала Бушейши
+# Интуитивная шкала Бушейши (по ADD)
+
+    if add < 35:
+        stage_bu = "до начала газообразования"
+
+    elif add < 75:
+        stage_bu = "начальное газообразование"
+
+    elif add < 200:
+        stage_bu = "выраженное газообразование"
+
+    elif add < 550:
+        stage_bu = "активный распад"
+
+    elif add < 650:
+        stage_bu = "активный распад или переход к сухому распаду"
+
+    elif add < 800:
+        stage_bu = "сухой распад"
+
+    elif add < 1000:
+        stage_bu = "сухой распад или переход к скелетированию"
+
+    else:
+        stage_bu = "скелетирование"
+    verdict = (
+        f"Сумма эффективных/положительных температур: {add}. "
+        f"Если верить творчески извращённому уравнению Медьёзи в пересказе Гугл ИИ, "
+        f"то этой сумме положительных температур соответствует total body score {tbs} "
+        f"и стадия декомпозиции {stage}. "
+        f"Если верить интуитивной шкале Бушейши, не основанной вообще ни на чём, "
+        f"то этой сумме соответствует стадия {stage_bu}.\n\n"
+        f"Не доверяйте моему неестественному интеллекту на 100%, "
+        f"а лучше сами идите учиться на курс Регпод.\n\n"
+        f"Не переключайтесь, мы ещё и байесовские модели попробуем!"
+    )
+    return verdict
+
+
+def tell_verdict(file_path: str) -> str:
+    add = ADD(file_path)
+    tbs = calculate_tbs(add)
+    return verdict_tbs(tbs, add)

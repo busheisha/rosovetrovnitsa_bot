@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from telegram import Update
@@ -13,6 +14,12 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 
+REPROACH_USER_IDS = {
+    int(uid.strip())
+    for uid in config("REPROACH_LIST", default="").split(",")
+    if uid.strip()
+}
+
 
 # Define a few command handlers. These usually take the two arguments update and
 # context.
@@ -27,37 +34,72 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def rose(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        user_id = update.effective_user.id
-        
-        # Пути к файлам
-        input_file_path = f'bot/files/{user_id}.xls.gz'
-        windrose_path = f'bot/files/images/{user_id}_windrose.jpg'
-        temperature_path = f'bot/files/images/{user_id}_temperature.jpg'
-        rain_path = f'bot/files/images/{user_id}_rain.jpg'
-        
-        try: 
-            file = await update.message.document.get_file()
-            await file.download_to_drive(custom_path=input_file_path)
-            # Валидируем файл
-            is_valid, message = validate_meteo_file(input_file_path)
-            if not is_valid:
-                await update.message.reply_text(message)
-                # Удаляем невалидный файл
-                if os.path.exists(input_file_path):
-                    os.remove(input_file_path)
-                return
-        
-        
-            await update.message.reply_photo(create_combined_rose(input_file_path, windrose_path))
-            await update.message.reply_photo(create_temperature(input_file_path, temperature_path))
-            await update.message.reply_photo(create_rain(input_file_path, rain_path))
-            
-            await update.message.reply_text(text=messages.ROSE_MESSAGE)
-        except Exception as e:
-            await update.message.reply_text(text=f"❌ Ошибка при обработке файла: {e}")
-                        # Очищаем файлы в случае ошибки
+    user_id = update.effective_user.id
+    reproach = user_id in REPROACH_USER_IDS
+
+    input_file_path = f'bot/files/{user_id}.xls.gz'
+    windrose_path = f'bot/files/images/{user_id}_windrose.jpg'
+    temperature_path = f'bot/files/images/{user_id}_temperature.jpg'
+    rain_path = f'bot/files/images/{user_id}_rain.jpg'
+
+    try:
+        file = await update.message.document.get_file()
+        await file.download_to_drive(custom_path=input_file_path)
+        is_valid, message = validate_meteo_file(input_file_path)
+        if not is_valid:
+            await update.message.reply_text(message)
             if os.path.exists(input_file_path):
                 os.remove(input_file_path)
+            return
+
+        if reproach:
+            await update.message.reply_text(messages.REPROACH_MESSAGE)
+            await asyncio.sleep(20)
+
+        try:
+            await update.message.reply_photo(
+                create_combined_rose(input_file_path, windrose_path)
+            )
+        except Exception as e:
+            logging.warning("reply_photo (роза ветров): %s", e)
+            await update.message.reply_text(
+                "Извините, я почему-то не смогла отправить розу ветров. Может быть, в архиве не было ветра? Проверьте, пожалуйста, что он именно с метеостанции/из аэропорта, а не с метеодатчика🫠"
+            )
+
+        if reproach:
+            await asyncio.sleep(10)
+
+        try:
+            await update.message.reply_photo(
+                create_temperature(input_file_path, temperature_path)
+            )
+        except Exception as e:
+            logging.warning("reply_photo (температура): %s", e)
+            await update.message.reply_text(
+                "Почему-то я не смогла сделать график температуры((Хз почему, напишите Бушейше."
+            )
+
+        if reproach:
+            await asyncio.sleep(10)
+
+        try:
+            await update.message.reply_photo(create_rain(input_file_path, rain_path))
+        except Exception as e:
+            logging.warning("reply_photo (осадки): %s", e)
+            await update.message.reply_text(
+                "Что-то не ладится с графиком осадков... Надеюсь, он был Вам не очень нужен -- в любом случае, если что, напишите Бушейше."
+            )
+        try:
+            await update.message.reply_text(text=tell_verdict(input_file_path))
+        except Exception:
+            await update.message.reply_text(
+                "Что-то не ладится с эффективными температурами... Надеюсь, они Вам не очень нужны -- в любом случае, если что, напишите Бушейше."
+            )
+        await update.message.reply_text(text=messages.ROSE_MESSAGE)
+    except Exception as e:
+        await update.message.reply_text(text=f"❌ Ошибка при обработке файла: {e}")
+        if os.path.exists(input_file_path):
+            os.remove(input_file_path)
 
 
 
